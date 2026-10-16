@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>邏輯圖編輯器 - 專業版</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        
+        /* 畫布網格背景 */
+        :root { --bg-color: #f8f9fa; --grid-color: #e5e7eb; }
+        .canvas-bg { 
+            background-color: var(--bg-color, #f8f9fa); 
+            background-image: radial-gradient(var(--grid-color, #e5e7eb) 1px, transparent 1px); 
+            background-size: 20px 20px; 
+            transition: background-color 0.3s ease;
+        }
+        .node-content.node-selected { box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.7); }
+        .node-content.multi-selected { box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.4); }
+        
+        /* 隱藏捲軸但可滾動 */
+        .hide-scroll::-webkit-scrollbar { display: none; }
+        
+        /* 面板動畫 */
+        #sidePanelContainer { transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+    </style>
+</head>
+<body class="h-screen w-screen overflow-hidden text-gray-700 bg-white font-sans flex">
+
+    <!-- 儀表板 (Dashboard) - 保持不變 -->
+    <div id="view-dashboard" class="flex w-full h-full bg-gray-50">
+        <div class="w-64 bg-white border-r flex flex-col p-4 shrink-0 shadow-sm z-10">
+            <div class="text-blue-600 text-2xl font-bold flex items-center gap-2 mb-8">
+                <i class="fa-solid fa-circle-nodes"></i> <span>Diagram Pro</span>
+            </div>
+            <button onclick="createNewFile()" class="bg-blue-500 text-white py-2.5 rounded-lg font-bold hover:bg-blue-600 mb-6 flex items-center justify-center gap-2 shadow-md transition-transform active:scale-95">
+                <i class="fa-solid fa-plus"></i> 新建文件
+            </button>
+            <nav class="space-y-1">
+                <a href="#" onclick="showDashboardView('files')" id="nav-files" class="flex items-center gap-3 px-3 py-2 bg-blue-50 text-blue-600 rounded-md font-bold transition-colors">
+                    <i class="fa-regular fa-folder w-5"></i> 我的文件
+                </a>
+                <a href="#" onclick="showDashboardView('trash')" id="nav-trash" class="flex items-center gap-3 px-3 py-2 text-gray-600 hover:bg-gray-100 rounded-md transition-colors">
+                    <i class="fa-solid fa-trash-can-arrow-up w-5"></i> 垃圾桶
+                </a>
+            </nav>
+        </div>
+        <div class="flex-1 p-8 overflow-auto">
+            <div id="dashboard-files-view">
+                <h2 class="text-xl font-bold mb-6 text-gray-800">我的文件</h2>
+                <div class="bg-white border rounded-xl shadow-sm overflow-hidden">
+                    <div class="grid grid-cols-12 gap-4 px-6 py-4 border-b text-sm font-bold text-gray-500 bg-gray-50/50">
+                        <div class="col-span-8">文件名稱</div>
+                        <div class="col-span-4">最後更新時間</div>
+                    </div>
+                    <div id="file-list" class="divide-y"></div>
+                </div>
+            </div>
+            <div id="dashboard-trash-view" class="hidden">
+                <h2 class="text-xl font-bold mb-6 text-gray-800">垃圾桶</h2>
+                <div class="bg-white border rounded-xl shadow-sm overflow-hidden">
+                    <div class="grid grid-cols-12 gap-4 px-6 py-4 border-b text-sm font-bold text-gray-500 bg-gray-50/50">
+                        <div class="col-span-6">文件名稱</div>
+                        <div class="col-span-3">刪除時間</div>
+                        <div class="col-span-3 text-right">操作</div>
+                    </div>
+                    <div id="trash-list" class="divide-y"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 編輯器 (Editor) -->
+    <div id="view-editor" class="hidden flex-col h-full w-full">
+        <!-- 頂部導覽列 -->
+        <header class="h-14 border-b flex items-center justify-between px-4 bg-white z-20 shrink-0 shadow-sm">
+            <div class="flex items-center space-x-4">
+                <button onclick="backToDashboard()" class="text-gray-400 hover:text-blue-500 w-8 h-8 rounded hover:bg-gray-100 flex items-center justify-center transition-colors" title="返回首頁">
+                    <i class="fa-solid fa-chevron-left"></i>
+                </button>
+                <div class="text-blue-500 text-xl"><i class="fa-solid fa-circle-nodes"></i></div>
+                <div class="flex flex-col ml-2">
+                    <div class="flex items-center space-x-3">
+                        <input type="text" id="document-title" value="未命名文件" class="font-bold text-sm border-none focus:ring-1 focus:ring-blue-500 rounded px-1 outline-none w-48 transition-shadow" onchange="updateFileName(this.value)">
+                        <span id="save-status" class="text-xs text-green-500 bg-green-50 px-2 py-0.5 rounded-full"><i class="fa-regular fa-circle-check"></i> 已儲存</span>
+                    </div>
+                </div>
+                <div class="h-6 w-px bg-gray-200 mx-2"></div>
+                <div class="flex space-x-1 text-gray-500">
+                    <button onclick="undo()" class="hover:text-blue-500 hover:bg-gray-100 w-8 h-8 rounded flex items-center justify-center transition-colors" title="上一步 (Ctrl+Z)"><i class="fa-solid fa-rotate-left"></i></button>
+                    <button onclick="redo()" class="hover:text-blue-500 hover:bg-gray-100 w-8 h-8 rounded flex items-center justify-center transition-colors" title="下一步 (Ctrl+Y)"><i class="fa-solid fa-rotate-right"></i></button>
+                </div>
+            </div>
+            <button onclick="exportJSON()" class="flex items-center gap-2 text-sm text-gray-600 hover:text-blue-600 hover:bg-blue-50 px-3 py-1.5 rounded-md transition-colors border" title="下載備份檔">
+                <i class="fa-solid fa-download"></i> 導出
+            </button>
+        </header>
+
+        <!-- 主要內容區 -->
+        <main class="flex-1 flex overflow-hidden relative">
+            
+            <!-- 左側畫布區 -->
+            <div class="flex-1 canvas-bg relative overflow-auto" id="canvas-container">
+                <div id="canvas-content" style="transform-origin: 0 0;">
+                    <div id="canvas" class="absolute top-0 left-0 w-[4000px] h-[4000px]">
+                        <!-- Marquee selection box -->
+                        <div id="selection-box" class="absolute border-2 border-dashed border-blue-500 bg-blue-500/20 hidden z-50 pointer-events-none"></div>
+                        <!-- 節點和線條動態生成 -->
+                    </div>
+                </div>
+            </div>
+            <button onclick="focusOnRootNode()" class="absolute bottom-4 right-96 w-10 h-10 bg-white/80 backdrop-blur-sm border rounded-full shadow-lg flex items-center justify-center text-gray-600 hover:text-blue-500 hover:scale-110 transition-all z-30" title="聚焦中心主題 (F)">
+                <i class="fa-solid fa-crosshairs"></i>
+            </button>
+
+            <!-- 可收合的側邊欄容器 -->
+            <div id="sidePanelContainer" class="w-80 bg-white border-l flex flex-col h-full shrink-0 z-20 shadow-xl relative">
+                
+                <!-- 側邊欄內容區 -->
+                <div id="sidePanelContent" class="flex-1 overflow-hidden flex flex-col w-80 opacity-100 transition-opacity duration-300">
+                    
+                    <!-- 樣式面板 -->
+                    <div id="panel-style" class="panel-content flex-1 overflow-y-auto pb-10">
+                        <div class="sticky top-0 bg-white p-4 border-b font-bold text-gray-800 flex items-center gap-2 z-10">
+                            <i class="fa-solid fa-palette text-blue-500"></i> 外觀與配色
+                        </div>
+                        <div class="p-4 space-y-8">
+    
+                            <!-- 畫布背景 (對應 image_23cb2d.png) -->
+                            <div>
+                                <div class="font-bold text-sm mb-3 text-gray-700">畫布背景</div>
+                                <div class="flex items-center gap-2">
+                                    <select id="bg-fill-type" class="border border-gray-300 rounded px-3 py-1.5 text-sm bg-white outline-none focus:border-blue-500 flex-1 cursor-pointer" onchange="updateCanvasBg()">
+                                        <option value="none">無填充</option>
+                                        <option value="solid" selected>純色填充</option>
+                                        <option value="image">圖片填充</option>
+                                    </select>
+                                    <div class="relative w-12 h-8 border border-gray-300 rounded overflow-hidden shrink-0 cursor-pointer">
+                                        <input type="color" id="bg-color-picker" value="#f8f9fa" class="absolute -top-2 -left-2 w-16 h-16 cursor-pointer" onchange="updateCanvasBg()">
+                                    </div>
+                                </div>
+                            </div>
+
+                            <hr class="border-gray-100">
+
+                            <!-- 配色主題 (對應 image_241dba.png 與 image_241ddf.png) -->
+                            <div>
+                                <div class="font-bold text-sm mb-3 text-gray-700">配色</div>
+                                <div class="relative">
+                                    <!-- 仿製下拉選單按鈕 -->
+                                    <button onclick="toggleThemeDropdown()" class="w-full border border-gray-300 rounded p-2 flex items-center justify-between bg-white hover:border-blue-500 transition-colors">
+                                        <div class="flex items-center gap-3" id="current-theme-display">
+                                            <!-- 當前顏色條預覽 -->
+                                            <div class="flex h-4 w-16 rounded-sm overflow-hidden">
+                                                <div class="flex-1 bg-[#3a0ca3]"></div><div class="flex-1 bg-[#e9edc9]"></div><div class="flex-1 bg-[#4361ee]"></div><div class="flex-1 bg-[#cc99ff]"></div>
+                                            </div>
+                                            <span class="text-sm text-gray-700" id="current-theme-name">紫色國韻</span>
+                                        </div>
+                                        <i class="fa-solid fa-caret-down text-gray-400 text-xs"></i>
+                                    </button>
+
+                                    <!-- 下拉選單內容 -->
+                                    <div id="theme-dropdown" class="hidden absolute top-full left-0 w-full bg-white border border-gray-200 rounded shadow-lg z-50 mt-1 max-h-64 overflow-y-auto hide-scroll">
+                                        <ul class="py-1 text-sm text-gray-700">
+                                            <li onclick="selectTheme('classic', '經典推薦', ['#ef4444', '#f59e0b', '#10b981', '#3b82f6', '#8b5cf6', '#1e293b'])" class="px-4 py-2 hover:bg-gray-100 cursor-pointer flex items-center gap-3">
+                                                <div class="flex h-4 w-20 rounded-sm overflow-hidden"><div class="flex-1 bg-[#ef4444]"></div><div class="flex-1 bg-[#f59e0b]"></div><div class="flex-1 bg-[#10b981]"></div><div class="flex-1 bg-[#3b82f6]"></div><div class="flex-1 bg-[#8b5cf6]"></div></div> 經典推薦
+                                            </li>
+                                            <li onclick="selectTheme('retro', '復古彩虹', ['#cb8a77', '#c9af6d', '#8b9d69', '#7a8fb7', '#9782a9', '#3b424d'])" class="px-4 py-2 hover:bg-gray-100 cursor-pointer flex items-center gap-3">
+                                                <div class="flex h-4 w-20 rounded-sm overflow-hidden"><div class="flex-1 bg-[#cb8a77]"></div><div class="flex-1 bg-[#c9af6d]"></div><div class="flex-1 bg-[#8b9d69]"></div><div class="flex-1 bg-[#7a8fb7]"></div><div class="flex-1 bg-[#9782a9]"></div></div> 復古彩虹
+                                            </li>
+                                            <li onclick="selectTheme('vibrant', '活力幻彩', ['#2a2346', '#ffffff', '#6347d4', '#afd735', '#4361ee', '#cc77ff'])" class="px-4 py-2 hover:bg-gray-100 cursor-pointer flex items-center gap-3">
+                                                <div class="flex h-4 w-20 rounded-sm overflow-hidden"><div class="flex-1 bg-[#2a2346]"></div><div class="flex-1 bg-[#6347d4]"></div><div class="flex-1 bg-[#afd735]"></div><div class="flex-1 bg-[#4361ee]"></div><div class="flex-1 bg-[#cc77ff]"></div></div> 活力幻彩
+                                            </li>
+                                            <li onclick="selectTheme('business', '簡約商務', ['#e1d3b0', '#56b8ab', '#70d6ff', '#3b82f6', '#4361ee', '#0b132b'])" class="px-4 py-2 hover:bg-gray-100 cursor-pointer flex items-center gap-3">
+                                                <div class="flex h-4 w-20 rounded-sm overflow-hidden"><div class="flex-1 bg-[#e1d3b0]"></div><div class="flex-1 bg-[#56b8ab]"></div><div class="flex-1 bg-[#70d6ff]"></div><div class="flex-1 bg-[#3b82f6]"></div><div class="flex-1 bg-[#0b132b]"></div></div> 簡約商務
+                                            </li>
+                                            <li onclick="selectTheme('purple', '紫色國韻', ['#3a0ca3', '#e9edc9', '#7209b7', '#4361ee', '#cc99ff'])" class="px-4 py-2 hover:bg-gray-100 cursor-pointer flex items-center gap-3 bg-gray-50 text-blue-600 font-bold">
+                                                <i class="fa-solid fa-check text-xs -ml-4 w-4 text-center"></i>
+                                                <div class="flex h-4 w-20 rounded-sm overflow-hidden"><div class="flex-1 bg-[#3a0ca3]"></div><div class="flex-1 bg-[#e9edc9]"></div><div class="flex-1 bg-[#7209b7]"></div><div class="flex-1 bg-[#4361ee]"></div><div class="flex-1 bg-[#cc99ff]"></div></div> 紫色國韻
+                                            </li>
+                                        </ul>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <hr class="border-gray-100">
+
+                            <!-- 預置主題風格 (對應 image_242142.png) -->
+                            <div>
+                                <div class="font-bold text-sm mb-3 text-gray-700">預置主題風格 <span class="text-xs font-normal text-gray-400 ml-1">(選取節點後套用)</span></div>
+                                <div class="grid grid-cols-3 gap-2">
+                                    <button onclick="applyPresetNodeStyle('important')" class="bg-[#ea5455] text-white py-2 rounded-md text-sm hover:opacity-90 transition-opacity tracking-widest shadow-sm">重點</button>
+                                    <button onclick="applyPresetNodeStyle('pending')" class="bg-[#f0932b] text-white py-2 rounded-md text-sm hover:opacity-90 transition-opacity tracking-widest shadow-sm">待定</button>
+                                    <button onclick="applyPresetNodeStyle('done')" class="bg-[#6ab04c] text-white py-2 rounded-md text-sm hover:opacity-90 transition-opacity tracking-widest shadow-sm">完成</button>
+                                    <button onclick="applyPresetNodeStyle('highlight')" class="bg-[#487eb0] text-white py-2 rounded-md text-sm hover:opacity-90 transition-opacity tracking-widest shadow-sm">突出</button>
+                                    <button onclick="applyPresetNodeStyle('delete')" class="bg-[#b2bec3] text-white py-2 rounded-md text-sm hover:opacity-90 transition-opacity tracking-widest shadow-sm line-through">刪除</button>
+                                    <button onclick="applyPresetNodeStyle('secondary')" class="bg-white text-[#f0932b] border border-dashed border-[#f0932b] py-2 rounded-md text-sm hover:bg-orange-50 transition-colors tracking-widest">次要</button>
+                                </div>
+                            </div>
+
+                            <hr class="border-gray-100">
+
+                            <!-- 字體樣式 -->
+                            <div>
+                                <div class="font-bold text-sm mb-3 text-gray-700">字體樣式 <span class="text-xs font-normal text-gray-400 ml-1">(選取節點後套用)</span></div>
+                                <div class="space-y-3">
+                                    <div class="flex gap-2">
+                                        <select id="font-family-select" onchange="applyFontFamily(this.value)" class="flex-1 border border-gray-300 rounded px-2 py-1.5 text-sm bg-white outline-none focus:border-blue-500 cursor-pointer">
+                                            <option value="'Microsoft YaHei', 'PingFang SC', sans-serif">思源黑體</option>
+                                            <option value="'SimSun', 'STSong', serif">宋體</option>
+                                            <option value="'KaiTi', 'STKaiti', serif">楷體</option>
+                                            <option value="Arial, Helvetica, sans-serif">Arial</option>
+                                        </select>
+                                        <input type="number" id="font-size-select" value="16" onchange="applyFontSize(this.value + 'px')" class="w-16 border border-gray-300 rounded px-2 py-1.5 text-sm bg-white outline-none focus:border-blue-500">
+                                    </div>
+                                    <!-- 新增：文字排版與對齊按鈕 -->
+                                    <div class="flex items-center gap-2">
+                                        <div class="flex border border-gray-300 rounded overflow-hidden bg-white">
+                                            <button onclick="applyTextFormat('bold')" id="btn-format-bold" class="w-8 h-8 flex items-center justify-center hover:bg-gray-100 text-gray-600 transition-colors font-bold">B</button>
+                                            <button onclick="applyTextFormat('italic')" id="btn-format-italic" class="w-8 h-8 flex items-center justify-center hover:bg-gray-100 text-gray-600 transition-colors italic border-l border-gray-200">I</button>
+                                            <button onclick="applyTextFormat('underline')" id="btn-format-underline" class="w-8 h-8 flex items-center justify-center hover:bg-gray-100 text-gray-600 transition-colors underline border-l border-gray-200">U</button>
+                                            <button onclick="applyTextFormat('line-through')" id="btn-format-strikethrough" class="w-8 h-8 flex items-center justify-center hover:bg-gray-100 text-gray-600 transition-colors line-through border-l border-gray-200">S</button>
+                                        </div>
+                                        <div class="flex border border-gray-300 rounded overflow-hidden bg-white">
+                                            <button onclick="applyTextAlign('left')" id="btn-align-left" class="w-8 h-8 flex items-center justify-center hover:bg-gray-100 text-gray-600 transition-colors"><i class="fa-solid fa-align-left"></i></button>
+                                            <button onclick="applyTextAlign('center')" id="btn-align-center" class="w-8 h-8 flex items-center justify-center hover:bg-gray-100 text-gray-600 transition-colors border-l border-gray-200"><i class="fa-solid fa-align-center"></i></button>
+                                            <button onclick="applyTextAlign('right')" id="btn-align-right" class="w-8 h-8 flex items-center justify-center hover:bg-gray-100 text-gray-600 transition-colors border-l border-gray-200"><i class="fa-solid fa-align-right"></i></button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <hr class="border-gray-100">
+
+                            <!-- 連接線樣式 -->
+                            <div>
+                                <div class="font-bold text-sm mb-3 text-gray-700">連接線樣式 <span class="text-xs font-normal text-gray-400 ml-1">(選取節點後套用)</span></div>
+                                <div class="space-y-3">
+                                    <div class="flex gap-2">
+                                        <select id="line-style-select" onchange="applyLineStyle('lineStyle', this.value)" class="flex-1 border border-gray-300 rounded px-2 py-1.5 text-sm bg-white outline-none focus:border-blue-500 cursor-pointer">
+                                            <option value="solid">實線 ──</option>
+                                            <option value="dashed">虛線 - - -</option>
+                                            <option value="dotted">點線 · · ·</option>
+                                        </select>
+                                        <!-- 擴充箭頭選項 -->
+                                        <select id="line-arrow-select" onchange="applyLineStyle('lineArrow', this.value)" class="flex-1 border border-gray-300 rounded px-2 py-1.5 text-sm bg-white outline-none focus:border-blue-500 cursor-pointer">
+                                            <option value="none">無箭頭 ──</option>
+                                            <option value="arrow">實心箭頭 ➔</option>
+                                            <option value="triangle">空心箭頭 ▷</option>
+                                            <option value="circle">圓形結尾 ●</option>
+                                            <option value="diamond">菱形結尾 ◆</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label for="line-label-input" class="text-xs text-gray-500">線條標籤</label>
+                                        <input type="text" id="line-label-input" onchange="applyLineLabel(this.value)" class="w-full border border-gray-300 rounded px-3 py-1.5 text-sm bg-white outline-none focus:border-blue-500">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 結構面板 -->
+                    <div id="panel-layout" class="panel-content flex-1 overflow-y-auto hidden pb-10">
+                        <div class="sticky top-0 bg-white p-4 border-b font-bold text-gray-800 flex items-center gap-2 z-10">
+                            <i class="fa-solid fa-diagram-project text-blue-500"></i> 結構排版
+                        </div>
+                        <div class="p-4 space-y-6">
+                            
+                            <!-- 思維導圖系列 -->
+                            <div>
+                                <div class="text-xs font-bold text-gray-500 mb-3 border-l-2 border-blue-500 pl-2">思維導圖 (Mind Map)</div>
+                                <div class="grid grid-cols-3 gap-2">
+                                    <button class="border rounded p-3 flex flex-col items-center hover:border-blue-500 hover:bg-blue-50 group" onclick="autoLayout('mindmap-right')">
+                                        <i class="fa-solid fa-sitemap rotate-90 text-gray-400 group-hover:text-blue-500 text-xl mb-1"></i>
+                                        <span class="text-[10px] text-gray-500">向右</span>
+                                    </button>
+                                    <button class="border rounded p-3 flex flex-col items-center hover:border-blue-500 hover:bg-blue-50 group" onclick="autoLayout('mindmap-left')">
+                                        <i class="fa-solid fa-sitemap -rotate-90 text-gray-400 group-hover:text-blue-500 text-xl mb-1"></i>
+                                        <span class="text-[10px] text-gray-500">向左</span>
+                                    </button>
+                                    <button class="border rounded p-3 flex flex-col items-center hover:border-blue-500 hover:bg-blue-50 group" onclick="autoLayout('mindmap-both')">
+                                        <i class="fa-solid fa-share-nodes text-gray-400 group-hover:text-blue-500 text-xl mb-1"></i>
+                                        <span class="text-[10px] text-gray-500">雙側</span>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- 組織圖系列 -->
+                            <div>
+                                <div class="text-xs font-bold text-gray-500 mb-3 border-l-2 border-green-500 pl-2">組織結構圖 (Org Chart)</div>
+                                <div class="grid grid-cols-3 gap-2">
+                                    <button class="border rounded p-3 flex flex-col items-center hover:border-green-500 hover:bg-green-50 group" onclick="autoLayout('orgchart-down')">
+                                        <i class="fa-solid fa-sitemap text-gray-400 group-hover:text-green-500 text-xl mb-1"></i>
+                                        <span class="text-[10px] text-gray-500">向下</span>
+                                    </button>
+                                    <button class="border rounded p-3 flex flex-col items-center hover:border-green-500 hover:bg-green-50 group" onclick="autoLayout('orgchart-up')">
+                                        <i class="fa-solid fa-sitemap rotate-180 text-gray-400 group-hover:text-green-500 text-xl mb-1"></i>
+                                        <span class="text-[10px] text-gray-500">向上</span>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- 時間軸/魚骨圖系列 -->
+                            <div>
+                                <div class="text-xs font-bold text-gray-500 mb-3 border-l-2 border-purple-500 pl-2">時間軸 & 魚骨圖 (Timeline)</div>
+                                <div class="grid grid-cols-2 gap-2">
+                                    <button class="border rounded p-3 flex flex-col items-center hover:border-purple-500 hover:bg-purple-50 group" onclick="autoLayout('timeline')">
+                                        <i class="fa-solid fa-timeline text-gray-400 group-hover:text-purple-500 text-xl mb-1"></i>
+                                        <span class="text-[10px] text-gray-500">橫向時間軸</span>
+                                    </button>
+                                    <button class="border rounded p-3 flex flex-col items-center hover:border-purple-500 hover:bg-purple-50 group" onclick="autoLayout('fishbone')">
+                                        <i class="fa-solid fa-fish-fins text-gray-400 group-hover:text-purple-500 text-xl mb-1"></i>
+                                        <span class="text-[10px] text-gray-500">簡易魚骨排版</span>
+                                    </button>
+                                </div>
+                            </div>
+
+                        </div>
+                        <!-- 佈局設定 (對應 image_23c7e1.png) -->
+                        <hr class="border-gray-100 my-4 mx-4">
+                        <div class="px-4 pb-4">
+                            <div class="font-bold text-sm mb-3 text-gray-700">佈局</div>
+                            <div class="space-y-3 mb-5">
+                                <label class="flex items-center gap-3 text-sm text-gray-600 cursor-pointer hover:text-blue-600">
+                                    <input type="checkbox" onchange="updateLayoutSetting('alignSiblings', this.checked)" id="layout-align-siblings" class="w-4 h-4 rounded border-gray-300 text-blue-500 focus:ring-blue-500 cursor-pointer"> 同級主題對齊
+                                </label>
+                                <label class="flex items-center gap-3 text-sm text-gray-600 cursor-pointer hover:text-blue-600">
+                                    <input type="checkbox" onchange="updateLayoutSetting('hideRoot', this.checked)" id="layout-hide-root" class="w-4 h-4 rounded border-gray-300 text-blue-500 focus:ring-blue-500 cursor-pointer"> 隱藏中心主題
+                                </label>
+                            </div>
+                            
+                            <div class="flex items-center justify-between">
+                                <span class="text-sm text-gray-600">主題間距</span>
+                                <select onchange="updateLayoutSetting('spacing', this.value)" id="layout-spacing" class="border border-gray-300 rounded px-2 py-1 text-sm bg-white outline-none focus:border-blue-500 w-24">
+                                    <option value="default">預設</option>
+                                    <option value="compact">緊湊</option>
+                                    <option value="loose">寬鬆</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 插入面板 -->
+                    <div id="panel-insert" class="panel-content flex-1 overflow-y-auto hidden pb-10">
+                        <div class="sticky top-0 bg-white p-4 border-b font-bold text-gray-800 flex items-center gap-2 z-10">
+                            <i class="fa-solid fa-puzzle-piece text-blue-500"></i> 插入內容
+                        </div>
+                        <div class="p-4 space-y-6">
+                            <div>
+                                <div class="font-bold text-sm mb-3 text-gray-700">圖片 <span class="text-xs font-normal text-gray-400 ml-1">(選取單一節點)</span></div>
+                                <button onclick="triggerImageUpload()" class="w-full bg-white border border-gray-300 text-gray-700 py-2 rounded-lg font-semibold hover:bg-gray-50 flex items-center justify-center gap-2 shadow-sm transition-transform active:scale-95">
+                                    <i class="fa-solid fa-image"></i> 上傳圖片
+                                </button>
+                                <input type="file" id="image-upload-input" class="hidden" accept="image/*" onchange="handleImageUpload(event)">
+                            </div>
+                            <hr class="border-gray-100">
+                            <div>
+                                <div class="font-bold text-sm mb-3 text-gray-700">圖示 <span class="text-xs font-normal text-gray-400 ml-1">(選取節點後插入)</span></div>
+                                <div id="icon-library" class="grid grid-cols-6 gap-2 text-center">
+                                    <!-- Icons will be dynamically inserted here by JS -->
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 最右側極簡工具列 (包含收合按鈕) -->
+                <aside class="absolute -left-12 top-0 bottom-0 w-12 bg-white border-r border-gray-200 flex flex-col items-center py-4 space-y-4 shadow-sm z-30">
+                    <button onclick="toggleSidebar()" id="toggleSidebarBtn" class="w-8 h-8 rounded-full bg-white border shadow flex items-center justify-center text-gray-500 hover:text-blue-500 hover:bg-gray-50 transition-all mb-4">
+                        <i class="fa-solid fa-chevron-right transition-transform duration-300" id="toggleIcon"></i>
+                    </button>
+                    
+                    <div class="w-6 h-px bg-gray-200"></div>
+
+                    <button onclick="showPanel('style')" class="w-10 h-10 rounded-lg text-blue-500 bg-blue-50 text-lg transition-colors flex items-center justify-center panel-trigger active-trigger" data-target="style" title="外觀配色">
+                        <i class="fa-solid fa-palette"></i>
+                    </button>
+                    <button onclick="showPanel('layout')" class="w-10 h-10 rounded-lg text-gray-400 hover:text-blue-500 hover:bg-blue-50 text-lg transition-colors flex items-center justify-center panel-trigger" data-target="layout" title="結構排版">
+                        <i class="fa-solid fa-diagram-project"></i>
+                    </button>
+                    <button onclick="showPanel('insert')" class="w-10 h-10 rounded-lg text-gray-400 hover:text-blue-500 hover:bg-blue-50 text-lg transition-colors flex items-center justify-center panel-trigger" data-target="insert" title="插入內容">
+                        <i class="fa-solid fa-puzzle-piece"></i>
+                    </button>
+                </aside>
+            </div>
+        </main>
+    </div>
+
+    <div id="context-menu" class="hidden absolute bg-white border rounded shadow-lg z-50 text-sm py-1">
+        <button onclick="addNodeFromContextMenu()" class="w-full text-left px-4 py-1.5 hover:bg-gray-100 flex items-center gap-2"><i class="fa-solid fa-plus text-xs"></i> 新增節點</button>
+    </div>
+
+    <script src="editor.js" defer></script>
+</body>
+</html>
